@@ -678,7 +678,9 @@ class Program:
                 if not track.filename:
                     # false positive htoa
                     continue
-                if track.skipped:
+                # a skipped track may still have a file from an earlier rip
+                # (see --tracks); list what is there
+                if not os.path.exists(track.filename):
                     continue
                 if track.number == 0:
                     length = (self.result.table.getTrackStart(1) /

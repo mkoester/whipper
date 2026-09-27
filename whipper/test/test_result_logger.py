@@ -178,11 +178,9 @@ class LoggerTestCase(unittest.TestCase):
             hashlib.sha256(log_body).hexdigest().upper()
         )
 
-    def testLoggerSkippedTrack(self):
-        # A track that failed to rip is marked skipped and never gets a peak
-        # level (trackResult.peak stays None). Writing the log for such a rip
-        # must not crash. Regression test for the TypeError raised by
-        # `peak = trackResult.peak / 32768.0` in trackLog().
+    @staticmethod
+    def _ripResultWithSkippedTrack(not_selected=False):
+        """Track 1 ripped; track 2 skipped (failed, or left out: --tracks)"""
         ripResult = RipResult()
         ripResult.offset = 6
         ripResult.overread = False
@@ -226,6 +224,7 @@ class LoggerTestCase(unittest.TestCase):
         trackResult.peak = None
         trackResult.quality = None
         trackResult.skipped = True
+        trackResult.not_selected = not_selected
         trackResult.testcrc = None
         trackResult.copycrc = None
         trackResult.AR = {
@@ -233,6 +232,14 @@ class LoggerTestCase(unittest.TestCase):
             "v2": {"DBConfidence": None, "DBCRC": None, "CRC": None},
         }
         ripResult.tracks.append(trackResult)
+        return ripResult
+
+    def testLoggerSkippedTrack(self):
+        # A track that failed to rip is marked skipped and never gets a peak
+        # level (trackResult.peak stays None). Writing the log for such a rip
+        # must not crash. Regression test for the TypeError raised by
+        # `peak = trackResult.peak / 32768.0` in trackLog().
+        ripResult = self._ripResultWithSkippedTrack()
 
         # Must not raise (previously a TypeError on None / 32768.0).
         actual = WhipperLogger().log(ripResult)
@@ -246,3 +253,20 @@ class LoggerTestCase(unittest.TestCase):
         # ...while the skipped track omits it and is marked accordingly.
         self.assertNotIn("Peak level", tracks[2])
         self.assertEqual(tracks[2]["Status"], "Track not ripped (skipped)")
+        self.assertEqual(
+            parsedLog["Conclusive status report"]["Health status"],
+            "Some tracks were not ripped (skipped)")
+
+    def testLoggerNotSelectedTrack(self):
+        # A track left out with --tracks is not a failure: it gets its own
+        # status, and the health status does not report skipped tracks.
+        ripResult = self._ripResultWithSkippedTrack(not_selected=True)
+
+        parsedLog = YAML(typ='rt', pure=True).load(
+            WhipperLogger().log(ripResult))
+
+        self.assertEqual(parsedLog["Tracks"][2]["Status"],
+                         "Track not ripped (not selected)")
+        self.assertEqual(
+            parsedLog["Conclusive status report"]["Health status"],
+            "Only selected tracks were ripped")

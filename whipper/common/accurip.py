@@ -240,6 +240,11 @@ def print_report(result):
             print('track  0: unknown          (not tracked)')
             continue
         if not (track.AR['v1']['CRC'] or track.AR['v2']['CRC']):
+            if track.not_selected:
+                # left out with --tracks and no file from an earlier rip
+                print('track %2d: not ripped       (not selected)' %
+                      track.number)
+                continue
             logger.error('no track AR CRC on non-HTOA track %d', track.number)
             print('track %2d: unknown          (error)' % track.number)
         else:
