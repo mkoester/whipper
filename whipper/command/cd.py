@@ -210,12 +210,16 @@ class _CD(BaseCommand):
                                              self.program.metadata)
         else:
             out_fpath = None
-        # now, read the complete index table, which is slower
+        # now, read the complete index table, which is slower; ripping
+        # selected tracks reuses the one an earlier rip of the disc saved
         offset = getattr(self.options, 'offset', 0)
+        reuse_toc = (getattr(self.options, 'tracks', None) is not None and
+                     not getattr(self.options, 'reread_toc', False))
         self.itable = self.program.getTable(self.runner,
                                             self.ittoc.getCDDBDiscId(),
                                             self.ittoc.getMusicBrainzDiscId(),
-                                            self.device, offset, out_fpath)
+                                            self.device, offset, out_fpath,
+                                            reuse_toc=reuse_toc)
 
         assert self.itable.getCDDBDiscId() == self.ittoc.getCDDBDiscId(), \
             "full table's id %s differs from toc id %s" % (
@@ -390,7 +394,15 @@ Log files will log the path to tracks relative to this directory.
                                  "3-7,10-13. May rip into a finished rip "
                                  "of the disc: other tracks are kept, "
                                  "selected ones are ripped again, and the "
-                                 "log is written next to the existing one")
+                                 "log is written next to the existing one. "
+                                 "Reuses the table of contents that rip "
+                                 "saved, instead of reading it again")
+        self.parser.add_argument('--reread-toc',
+                                 action="store_true", dest="reread_toc",
+                                 default=False,
+                                 help="with --tracks, read the table of "
+                                 "contents from the disc even if an "
+                                 "earlier rip saved it")
 
     def handle_arguments(self):
         self.options.output_directory = os.path.expanduser(
