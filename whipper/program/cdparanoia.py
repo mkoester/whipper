@@ -595,16 +595,17 @@ class ReadVerifyTrackTask(task.MultiSeparateTask):
                     self.checksum = self.testchecksum
                 elif accepted_checksum(c1, c2,
                                        self._earlier_checksums) is not None:
-                    logger.info('checksums do not match, %08x %08x, but the '
-                                'copy matches a read from an earlier try',
-                                c1, c2)
+                    logger.info('checksums do not match, %08x %08x, %s',
+                                c1, c2, color.good(
+                                    'but the copy matches a read from an '
+                                    'earlier try'))
                     # the verifying read is the earlier one
                     self.testchecksum = self.checksum = c2
                 else:
                     self._earlier_checksums.update((c1, c2))
                     # FIXME: detect this before encoding
-                    logger.info('checksums do not match, %08x %08x',
-                                c1, c2)
+                    logger.info('%s, %08x %08x',
+                                color.bad('checksums do not match'), c1, c2)
                     self.exception = ChecksumException(
                         'read and verify failed: test checksum')
 
