@@ -5,6 +5,7 @@ import tempfile
 import subprocess
 from subprocess import Popen, PIPE
 
+from whipper.common import color
 from whipper.common.common import truncate_filename
 from whipper.image.toc import TocFile
 from whipper.extern.task import task
@@ -172,7 +173,8 @@ class ReadTOCTask(task.Task):
             # If the output path doesn't exist, make it recursively
             try:
                 os.makedirs(t_dirn)
-                logger.info("creating output directory %s", t_dirn)
+                logger.info("creating output directory %s",
+                            color.bold(t_dirn))
             except FileExistsError as e:
                 logger.debug(e)
             shutil.copy(self.tocfile, saved_toc_path(self.toc_path))

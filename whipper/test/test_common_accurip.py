@@ -8,6 +8,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
+from whipper.common import color
 from whipper.common.accurip import (
     calculate_checksums, get_db_entry, print_report, verify_result,
     _split_responses, EntryNotFound
@@ -222,6 +223,7 @@ class TestAccurateRipReport(TestCase):
 
     def tearDown(self):
         sys.stdout = sys.__stdout__
+        color.set_mode('never')
 
     def test_report_no_result(self):
         track = TrackResult()
@@ -273,6 +275,26 @@ class TestAccurateRipReport(TestCase):
         self.assertEqual(
             sys.stdout.getvalue(),
             'track  0: unknown          (not tracked)\n'
+        )
+
+    def test_coloured_accurate_keeps_alignment(self):
+        color.set_mode('always')
+        print_report(self.result)
+        self.assertEqual(
+            sys.stdout.getvalue(),
+            'track  1: \033[32mrip accurate    \033[0m '
+            '(max confidence     12)'
+            ' v1 [284fc705], v2 [dc77f9ab], DB [284fc705, dc77f9ab]\n'
+        )
+
+    def test_coloured_not_accurate(self):
+        color.set_mode('always')
+        self.result.tracks[0].AR['DBMaxConfidence'] = None
+        print_report(self.result)
+        self.assertEqual(
+            sys.stdout.getvalue(),
+            'track  1: \033[31mrip NOT accurate\033[0m (not found)            '
+            ' v1 [284fc705], v2 [dc77f9ab], DB [notfound]\n'
         )
 
     def test_report_v1_only(self):

@@ -20,11 +20,13 @@
 # along with whipper.  If not, see <http://www.gnu.org/licenses/>.
 
 import struct
+import sys
 import whipper
 import os
 from urllib.error import URLError, HTTPError
 from urllib.request import urlopen, Request
 
+from whipper.common import color
 from whipper.program.arc import accuraterip_checksum
 
 import logging
@@ -255,7 +257,12 @@ def print_report(result):
             logger.error('no track AR CRC on non-HTOA track %d', track.number)
             print('track %2d: unknown          (error)' % track.number)
         else:
-            print('track %2d: %-16s %-23s v1 [%s], v2 [%s], DB [%s]' % (
+            # pad before colouring: escape codes would count towards %-16s
+            if status == 'rip accurate':
+                status = color.good('%-16s' % status, sys.stdout)
+            else:
+                status = color.bad('%-16s' % status, sys.stdout)
+            print('track %2d: %s %-23s v1 [%s], v2 [%s], DB [%s]' % (
                 track.number, status, conf,
                 track.AR['v1']['CRC'], track.AR['v2']['CRC'], db
             ))
