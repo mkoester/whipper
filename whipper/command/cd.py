@@ -405,6 +405,13 @@ Log files will log the path to tracks relative to this directory.
         if self.options.cover_art == "file":
             self.coverArtPath = None  # NOTE: avoid image embedding (hacky)
 
+        def _trackPath(number):
+            return self.program.getPath(self.program.outdir,
+                                        self.options.track_template,
+                                        self.mbdiscid,
+                                        self.program.metadata,
+                                        track_number=number) + '.flac'
+
         # FIXME: turn this into a method
         def _ripIfNotRipped(number):
             logger.debug('ripIfNotRipped for track %d', number)
@@ -417,11 +424,7 @@ Log files will log the path to tracks relative to this directory.
                 logger.debug('ripIfNotRipped have trackresult, path %r',
                              trackResult.filename)
 
-            path = self.program.getPath(self.program.outdir,
-                                        self.options.track_template,
-                                        self.mbdiscid,
-                                        self.program.metadata,
-                                        track_number=number) + '.flac'
+            path = _trackPath(number)
             logger.debug('ripIfNotRipped: path %r', path)
             trackResult.number = number
 
@@ -542,6 +545,20 @@ Log files will log the path to tracks relative to this directory.
                                     self.itable.getTrackLength(number),
                                     number)
 
+        # write the cue sheet before ripping, so that a rip which hangs or
+        # is interrupted still leaves one behind; it is written again once
+        # the rip is done, with the files as they were actually ripped
+        for i, track in enumerate(self.itable.tracks):
+            # FIXME: rip data tracks differently
+            if not track.audio:
+                # FIXME: make it work for now
+                track.indexes[1].relative = 0
+                continue
+            self.itable.setFile(i + 1, 1, _trackPath(i + 1),
+                                self.itable.getTrackLength(i + 1), i + 1)
+        logger.debug('writing cue file for %r before ripping', discName)
+        self.program.writeCue(discName)
+
         # check for hidden track one audio
         htoa = self.program.getHTOA()
         if htoa:
@@ -555,8 +572,6 @@ Log files will log the path to tracks relative to this directory.
             if not track.audio:
                 logger.warning('skipping data track %d, not implemented',
                                i + 1)
-                # FIXME: make it work for now
-                track.indexes[1].relative = 0
                 continue
             _ripIfNotRipped(i + 1)
 
