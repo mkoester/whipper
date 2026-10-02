@@ -12,19 +12,21 @@ except PackageNotFoundError:
     __version__ = get_version()
 
 level = logging.INFO
+# like logging.BASIC_FORMAT, but with a space before the message
+LOG_FORMAT = '%(levelname)s:%(name)s: %(message)s'
 if 'WHIPPER_DEBUG' in os.environ:
     level = os.environ['WHIPPER_DEBUG'].upper()
 
 log_init_func = logging.basicConfig
 if 'WHIPPER_COLOR_LOG' in os.environ:
     import coloredlogs
-    def init_coloredlogs(**kwargs):
+    def init_coloredlogs(format, **kwargs):
         # coloredlogs comes with its own log format, we don't want to use that
-        coloredlogs.install(fmt=logging.BASIC_FORMAT, **kwargs)
+        coloredlogs.install(fmt=format, **kwargs)
     log_init_func = init_coloredlogs
 
 if 'WHIPPER_LOGFILE' in os.environ:
     log_init_func(filename=os.environ['WHIPPER_LOGFILE'],
-                  filemode='w', level=level)
+                  filemode='w', level=level, format=LOG_FORMAT)
 else:
-    log_init_func(stream=sys.stderr, level=level)
+    log_init_func(stream=sys.stderr, level=level, format=LOG_FORMAT)
