@@ -612,7 +612,7 @@ class Program:
 
     def ripTrack(self, runner, trackResult, offset, device, taglist,
                  overread, what=None, coverArtPath=None,
-                 earlier_checksums=None):
+                 earlier_checksums=None, read_timeout=None):
         """
         Rip and store a track of the disc.
 
@@ -639,6 +639,9 @@ class Program:
         :param earlier_checksums: checksums of earlier failed tries of this
                                   track, shared across tries
         :type earlier_checksums: set(int) or None
+        :param read_timeout: seconds a single read may take; None means
+                             no limit
+        :type read_timeout: float or None
         """
         if trackResult.number == 0:
             start, stop = self.getHTOA()
@@ -660,7 +663,8 @@ class Program:
                                            taglist=taglist,
                                            what=what,
                                            coverArtPath=coverArtPath,
-                                           earlier_checksums=earlier_checksums)
+                                           earlier_checksums=earlier_checksums,
+                                           timeout=read_timeout)
 
         runner.run(t)
 

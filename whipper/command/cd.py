@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 SILENT = 0
 DEFAULT_MAX_RETRIES = 5
+DEFAULT_READ_TIMEOUT = 20  # minutes
 
 DEFAULT_TRACK_TEMPLATE = '%r/%A - %d/%t. %a - %n'
 DEFAULT_DISC_TEMPLATE = '%r/%A - %d/%A - %d'
@@ -377,6 +378,14 @@ Log files will log the path to tracks relative to this directory.
                                  "{}; 0 means "
                                  "infinity.".format(DEFAULT_MAX_RETRIES),
                                  default=DEFAULT_MAX_RETRIES)
+        self.parser.add_argument('--read-timeout',
+                                 action="store", dest="read_timeout",
+                                 help="minutes a single read of a track may "
+                                 "take before it is stopped and counted as "
+                                 "a failed rip attempt. This defaults to "
+                                 "{}; 0 means no limit.".format(
+                                     DEFAULT_READ_TIMEOUT),
+                                 default=DEFAULT_READ_TIMEOUT)
         self.parser.add_argument('-k', '--keep-going',
                                  action='store_true',
                                  help="continue ripping further tracks "
@@ -441,6 +450,13 @@ Log files will log the path to tracks relative to this directory.
             self.options.max_retries = float("inf")
         elif self.options.max_retries < 0:
             raise ValueError("number of max retries must be positive")
+
+        try:
+            self.options.read_timeout = float(self.options.read_timeout)
+        except ValueError:
+            raise ValueError("read timeout's value must be a number")
+        if self.options.read_timeout < 0:
+            raise ValueError("read timeout must not be negative")
 
         # check the syntax before the (slow) TOC read; the track count is
         # checked in doCommand, once it is known
@@ -605,7 +621,10 @@ Log files will log the path to tracks relative to this directory.
                                                   extra),
                                               coverArtPath=self.coverArtPath,
                                               earlier_checksums=(
-                                                  earlier_checksums))
+                                                  earlier_checksums),
+                                              read_timeout=(
+                                                  self.options.read_timeout *
+                                                  60 or None))
                         break
                     # FIXME: catching too general exception (Exception)
                     except Exception as e:

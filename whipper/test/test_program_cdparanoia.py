@@ -4,6 +4,7 @@
 import os
 import shutil
 import tempfile
+import time
 
 from whipper.extern.task import task
 
@@ -157,3 +158,52 @@ class CacheTestCase(common.TestCase):
         t = AnalyzeFileTask(path)
         self.runner.run(t)
         self.assertTrue(t.defeatsCache)
+
+
+class FakeTable:
+    tracks = []
+
+
+class ReadTimeoutTestCase(common.TestCase):
+    """Run ReadTrackTask against a stand-in cd-paranoia on PATH."""
+
+    def setUp(self):
+        self.bindir = tempfile.mkdtemp()
+        fd, self.wav = tempfile.mkstemp(suffix='.wav')
+        os.close(fd)
+        self.path = os.environ['PATH']
+        os.environ['PATH'] = self.bindir + os.pathsep + self.path
+
+    def tearDown(self):
+        os.environ['PATH'] = self.path
+        shutil.rmtree(self.bindir)
+        os.unlink(self.wav)
+
+    def _fake(self, script):
+        fake = os.path.join(self.bindir, 'cd-paranoia')
+        with open(fake, 'w') as f:
+            f.write('#!/bin/sh\n' + script + '\n')
+        os.chmod(fake, 0o755)
+
+    def _read(self, timeout):
+        t = cdparanoia.ReadTrackTask(self.wav, FakeTable(), 0, 74, False,
+                                     timeout=timeout)
+        started = time.time()
+        try:
+            task.SyncRunner(verbose=False).run(t)
+        except task.TaskException as e:
+            return e.exception, time.time() - started
+        self.fail('the read did not fail')
+
+    def testHangingReadTimesOut(self):
+        self._fake('exec sleep 60')
+        e, took = self._read(timeout=1)
+        self.assertIsInstance(e, cdparanoia.ReadTimeoutError)
+        self.assertLess(took, 10)
+
+    def testFinishedReadIsNotATimeout(self):
+        # exits at once without writing audio: a failure, but not a timeout,
+        # although the task only looks at it after the timeout has passed
+        self._fake('exit 0')
+        e, _ = self._read(timeout=0.5)
+        self.assertNotIsInstance(e, cdparanoia.ReadTimeoutError)
