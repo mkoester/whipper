@@ -7,7 +7,7 @@ import musicbrainzngs
 import whipper
 from whipper.command import cd, offset, drive, image, accurip, mblookup
 from whipper.command.basecommand import BaseCommand
-from whipper.common import common, config
+from whipper.common import color, common, config
 from whipper.extern.task import task
 from whipper.program.utils import eject_device
 
@@ -104,8 +104,14 @@ class Whipper(BaseCommand):
                                  dest="drive_auto_close", default=True,
                                  help="whether to auto close the drive's "
                                  "tray before reading a CD (default: True)")
+        self.parser.add_argument('--color', action="store", dest="color",
+                                 default="never", choices=color.MODES,
+                                 help="highlight important output: 'auto' "
+                                 "colours it on a terminal unless NO_COLOR "
+                                 "is set (default: never)")
 
     def handle_arguments(self):
+        color.set_mode(self.options.color)
         if self.options.help:
             self.parser.print_help()
             sys.exit(0)
