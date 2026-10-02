@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 SILENT = 0
 DEFAULT_MAX_RETRIES = 5
+DEFAULT_READ_TIMEOUT = 20  # minutes
 
 DEFAULT_TRACK_TEMPLATE = '%r/%A - %d/%t. %a - %n'
 DEFAULT_DISC_TEMPLATE = '%r/%A - %d/%A - %d'
@@ -321,6 +322,14 @@ Log files will log the path to tracks relative to this directory.
                                  "{}; 0 means "
                                  "infinity.".format(DEFAULT_MAX_RETRIES),
                                  default=DEFAULT_MAX_RETRIES)
+        self.parser.add_argument('--read-timeout',
+                                 action="store", dest="read_timeout",
+                                 help="minutes a single read of a track may "
+                                 "take before it is stopped and counted as "
+                                 "a failed rip attempt. This defaults to "
+                                 "{}; 0 means no limit.".format(
+                                     DEFAULT_READ_TIMEOUT),
+                                 default=DEFAULT_READ_TIMEOUT)
         self.parser.add_argument('-k', '--keep-going',
                                  action='store_true',
                                  help="continue ripping further tracks "
@@ -364,6 +373,13 @@ Log files will log the path to tracks relative to this directory.
             self.options.max_retries = float("inf")
         elif self.options.max_retries < 0:
             raise ValueError("number of max retries must be positive")
+
+        try:
+            self.options.read_timeout = float(self.options.read_timeout)
+        except ValueError:
+            raise ValueError("read timeout's value must be a number")
+        if self.options.read_timeout < 0:
+            raise ValueError("read timeout must not be negative")
 
     def doCommand(self):
         self.program.setWorkingDirectory(self.options.working_directory)
@@ -481,7 +497,10 @@ Log files will log the path to tracks relative to this directory.
                                                   number,
                                                   len(self.itable.tracks),
                                                   extra),
-                                              coverArtPath=self.coverArtPath)
+                                              coverArtPath=self.coverArtPath,
+                                              read_timeout=(
+                                                  self.options.read_timeout *
+                                                  60 or None))
                         break
                     # FIXME: catching too general exception (Exception)
                     except Exception as e:

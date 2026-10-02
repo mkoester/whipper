@@ -59,6 +59,14 @@ class ChecksumException(Exception):
     pass
 
 
+class ReadTimeoutError(Exception):
+    """cd-paranoia did not finish reading within the timeout."""
+
+    def __init__(self, timeout):
+        self.args = (timeout, )
+        self.timeout = timeout
+
+
 # example:
 # ##: 0 [read] @ 24696
 _PROGRESS_RE = re.compile(r"""
@@ -209,7 +217,7 @@ class ReadTrackTask(task.Task):
     _MAXERROR = 100  # number of errors detected by parser
 
     def __init__(self, path, table, start, stop, overread, offset=0,
-                 device=None, action="Reading", what="track"):
+                 device=None, action="Reading", what="track", timeout=None):
         """
         Read the given track.
 
@@ -229,6 +237,9 @@ class ReadTrackTask(task.Task):
         :type action: str
         :param what: a string representing what's being read; e.g. Track
         :type what: str
+        :param timeout: seconds after which a read that has not finished is
+                        terminated and fails; None means no limit
+        :type timeout: float or None
         """
         assert isinstance(path, str), "%r is not str" % path
 
@@ -241,6 +252,8 @@ class ReadTrackTask(task.Task):
         self._device = device
         self._start_time = None
         self._overread = overread
+        self._timeout = timeout
+        self._timed_out = False
 
         self._buffer = ""  # accumulate characters
         self._errors = []
@@ -318,6 +331,16 @@ class ReadTrackTask(task.Task):
         self.schedule(1.0, self._read, runner)
 
     def _read(self, runner):
+        # paranoia can retry a damaged spot without end, so give up on the
+        # read; the caller counts it as a failed try
+        if (self._timeout and not self._timed_out and
+                time.time() - self._start_time > self._timeout and
+                self._popen.poll() is None):
+            logger.warning('read not finished after %d seconds, terminating',
+                           self._timeout)
+            self._timed_out = True
+            self._popen.terminate()
+
         ret = self._popen.recv_err()
         if not ret:
             if self._popen.poll() is not None:
@@ -368,6 +391,11 @@ class ReadTrackTask(task.Task):
     def _done(self):
         end_time = time.time()
         self.setProgress(1.0)
+
+        if self._timed_out:
+            self.setAndRaiseException(ReadTimeoutError(self._timeout))
+            self.stop()
+            return
 
         # check if the length matches
         size = os.stat(self.path)[stat.ST_SIZE]
@@ -440,7 +468,8 @@ class ReadVerifyTrackTask(task.MultiSeparateTask):
     _tmppath = None
 
     def __init__(self, path, table, start, stop, overread, offset=0,
-                 device=None, taglist=None, what="track", coverArtPath=None):
+                 device=None, taglist=None, what="track", coverArtPath=None,
+                 timeout=None):
         """
         Init ReadVerifyTrackTask.
 
@@ -458,6 +487,9 @@ class ReadVerifyTrackTask(task.MultiSeparateTask):
         :type device: str
         :param taglist: a dict of tags
         :type taglist: dict
+        :param timeout: seconds each of the two reads may take; None means
+                        no limit
+        :type timeout: float or None
         """
         task.MultiSeparateTask.__init__(self)
 
@@ -476,11 +508,12 @@ class ReadVerifyTrackTask(task.MultiSeparateTask):
         self.tasks = []
         self.tasks.append(
             ReadTrackTask(tmppath, table, start, stop, overread,
-                          offset=offset, device=device, what=what))
+                          offset=offset, device=device, what=what,
+                          timeout=timeout))
         self.tasks.append(checksum.CRC32Task(tmppath))
         t = ReadTrackTask(tmppath, table, start, stop, overread,
                           offset=offset, device=device, action="Verifying",
-                          what=what)
+                          what=what, timeout=timeout)
         self.tasks.append(t)
         self.tasks.append(checksum.CRC32Task(tmppath))
 
