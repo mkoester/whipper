@@ -23,11 +23,13 @@ import cdio
 import importlib.util
 import os
 import glob
+import sys
 import logging
 from whipper.command.basecommand import BaseCommand
 from whipper.common import (
     accurip, config, drive, program, task
 )
+from whipper.common import color
 from whipper.common.common import validate_template
 from whipper.program import cdrdao, cdparanoia, utils
 from whipper.result import result
@@ -384,7 +386,7 @@ Log files will log the path to tracks relative to this directory.
                 logger.debug(msg)
                 raise RuntimeError(msg)
         else:
-            logger.info("creating output directory %s", dirname)
+            logger.info("creating output directory %s", color.bold(dirname))
             os.makedirs(dirname)
 
         self.coverArtPath = None
@@ -459,9 +461,10 @@ Log files will log the path to tracks relative to this directory.
                 while tries <= self.options.max_retries:
                     if tries > 1:
                         extra = " (try %d)" % tries
-                    logger.info('ripping track %d of %d%s: %s',
-                                number, len(self.itable.tracks), extra,
-                                os.path.basename(path))
+                    logger.info('%s: %s', color.bold(
+                        'ripping track %d of %d%s' % (
+                            number, len(self.itable.tracks), extra)),
+                        os.path.basename(path))
 
                     logger.debug('ripIfNotRipped: track %d, try %d', number,
                                  tries)
@@ -516,7 +519,8 @@ Log files will log the path to tracks relative to this directory.
                         )
 
                     print('Peak level: %.6f' % (trackResult.peak / 32768.0))
-                    print('Rip quality: {:.2%}'.format(trackResult.quality))
+                    quality = color.quality(trackResult.quality, sys.stdout)
+                    print('Rip quality: %s' % quality)
 
             # overlay this rip onto the Table
             if number == 0:

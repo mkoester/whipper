@@ -27,7 +27,7 @@ import subprocess
 import tempfile
 import time
 
-from whipper.common import common
+from whipper.common import color, common
 from whipper.common import task as ctask
 from whipper.extern import asyncsub
 from whipper.extern.task import task
@@ -531,7 +531,7 @@ class ReadVerifyTrackTask(task.MultiSeparateTask):
                 self.testchecksum = c1 = self.tasks[1].checksum
                 self.copychecksum = c2 = self.tasks[3].checksum
                 if c1 == c2:
-                    logger.info('checksums match, %08x', c1)
+                    logger.info('%s, %08x', color.good('checksums match'), c1)
                     self.checksum = self.testchecksum
                 else:
                     # FIXME: detect this before encoding
