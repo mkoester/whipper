@@ -26,6 +26,33 @@ _SUBCODE_EMPHASIS_LINE = ("Pre-emphasis flag of track differs from TOC - "
                           "toc file contains TOC setting.")
 
 
+class ReadTOCError(Exception):
+    """cdrdao read-toc failed and wrote no TOC."""
+
+    def __init__(self, returncode, message):
+        self.args = (returncode, message)
+        self.returncode = returncode
+        self.message = message
+
+    def __str__(self):
+        return "cdrdao read-toc failed (exit code %s): %s" % (
+            self.returncode, self.message)
+
+
+def error_summary(lines):
+    """
+    Return the lines of cdrdao output that explain a failure.
+
+    :param lines: cdrdao's stderr, one entry per line
+    :type lines: list(str)
+    :returns: its ERROR lines, else its last non-empty line, joined
+    :rtype: str
+    """
+    lines = [line.strip() for line in lines if line.strip()]
+    errors = [line for line in lines if line.startswith('ERROR:')]
+    return ' '.join(errors or lines[-1:]) or 'no output'
+
+
 class ProgressParser:
     tracks = 0
     currentTrack = 0
@@ -85,6 +112,7 @@ class ReadTOCTask(task.Task):
         self.fast_toc = fast_toc
         self.toc_path = toc_path
         self._buffer = ""  # accumulate characters
+        self._lines = []  # stderr lines, to explain a failure
         self._parser = ProgressParser()
 
         self.fd, self.tocfile = tempfile.mkstemp(
@@ -127,6 +155,7 @@ class ReadTOCTask(task.Task):
                 del lines[-1]
             else:
                 self._buffer = ""
+            self._lines.extend(lines)
             for line in lines:
                 self._parser.parse(line)
                 if (self._parser.currentTrack != 0 and
@@ -149,6 +178,15 @@ class ReadTOCTask(task.Task):
 
     def _done(self):
         self.setProgress(1.0)
+        if self._popen.returncode != 0 or not os.path.exists(self.tocfile):
+            # e.g. "ERROR: Unit not ready, giving up." while the drive spins up
+            self.setExceptionAndTraceback(ReadTOCError(
+                self._popen.returncode,
+                error_summary(self._lines + [self._buffer])))
+            if os.path.exists(self.tocfile):
+                os.unlink(self.tocfile)
+            self.stop()
+            return
         self.toc = TocFile(self.tocfile)
         self.toc.parse()
         if self.toc_path is not None:
