@@ -131,13 +131,18 @@ class _CD(BaseCommand):
             cddbid = self.ittoc.getCDDBValues()
             cddbmd = self.program.getCDDB(cddbid)
             if cddbmd:
-                logger.info('FreeDB identifies disc as %s', cddbmd)
+                logger.info('FreeDB identifies disc as %s',
+                            [record['DTITLE'] for record in cddbmd])
 
             # also used by rip cd info
             if not getattr(self.options, 'unknown', False):
                 logger.critical("unable to retrieve disc metadata, "
                                 "--unknown argument not passed")
                 return -1
+
+            if cddbmd:
+                self.program.metadata = self.program.chooseCDDB(
+                    cddbmd, len(self.ittoc.tracks))
 
         self.program.result.isCdr = cdrdao.DetectCdr(self.device)
         if (self.program.result.isCdr and

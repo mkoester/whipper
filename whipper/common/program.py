@@ -257,15 +257,19 @@ class Program:
         See: https://hydrogenaud.io/index.php?topic=118682
 
         :param cddbdiscid: list of id, tracks, offsets, seconds
-        :rtype: str
+        :returns: the matching xmcd records (keys like DTITLE, DYEAR,
+                  TTITLE0), or None
+        :rtype: list(dict) or None
         """
         # FIXME: convert to nonblocking?
         try:
-            md = freedb.perform_lookup(
+            md = list(freedb.perform_lookup(
                      cddbdiscid, 'gnudb.gnudb.org', 80
-            )
+            ))
             logger.debug('CDDB query result: %r', md)
-            return [item['DTITLE'] for item in md if 'DTITLE' in item] or None
+            # empty fields come back as '\r', titles with trailing spaces
+            return [{k: v.strip() for k, v in item.items()}
+                    for item in md if 'DTITLE' in item] or None
 
         except ValueError as e:
             logger.warning("CDDB protocol error: %s", e)
@@ -278,6 +282,75 @@ class Program:
                 raise
 
         return None
+
+    @staticmethod
+    def cddbToMetadata(record, track_count):
+        """
+        Convert a FreeDB (xmcd) record into disc metadata.
+
+        :param record: a record returned by getCDDB
+        :type record: dict
+        :param track_count: number of tracks on the disc
+        :type track_count: int
+        :rtype: mbngs.DiscMetadata
+        """
+        def split(title, artist):
+            # xmcd separates artist and title with ' / '; a disc title
+            # without one names both, a track title without one the title
+            if ' / ' in title:
+                return [part.strip() for part in title.split(' / ', 1)]
+            return artist or title, title
+
+        md = mbngs.DiscMetadata()
+        md.artist, md.title = split(record['DTITLE'], None)
+        md.sortName = md.artist
+        md.releaseTitle = md.title
+        year = record.get('DYEAR', '')
+        if re.fullmatch(r'\d{4}', year):
+            md.release = year
+        for i in range(track_count):
+            track = mbngs.TrackMetadata()
+            title = record.get('TTITLE%d' % i) or 'Unknown Track %d' % (i + 1)
+            track.artist, track.title = split(title, md.artist)
+            track.sortName = track.artist
+            track.composers = []
+            track.performers = []
+            md.tracks.append(track)
+        return md
+
+    def chooseCDDB(self, records, track_count):
+        """
+        Ask which FreeDB match, if any, to use as disc metadata.
+
+        :param records: records returned by getCDDB
+        :type records: list(dict)
+        :param track_count: number of tracks on the disc
+        :type track_count: int
+        :returns: the chosen metadata, or None to rip without
+        :rtype: mbngs.DiscMetadata or None
+        """
+        metadatas = [self.cddbToMetadata(r, track_count) for r in records]
+        print('\nMatching FreeDB entries (unverified, user-submitted):')
+        for i, (record, md) in enumerate(zip(records, metadatas), 1):
+            print('\n%d. Artist : %s' % (i, md.artist))
+            print('   Title  : %s' % md.title)
+            print('   Year   : %s' % (md.release or 'unknown'))
+            print('   Tracks : %d of %d titled' % (
+                sum(1 for n in range(track_count)
+                    if record.get('TTITLE%d' % n)), track_count))
+        while True:
+            answer = input('\nUse FreeDB entry [1], another number, or n '
+                           'for none: ').strip().lower()
+            if answer == 'n':
+                return None
+            if not answer:
+                answer = '1'
+            if answer.isdigit() and 1 <= int(answer) <= len(metadatas):
+                md = metadatas[int(answer) - 1]
+                print('Artist: %s' % md.artist)
+                print('Title : %s' % md.title)
+                return md
+            print('Please enter a number from 1 to %d, or n.' % len(metadatas))
 
     def getMusicBrainz(self, ittoc, mbdiscid, release=None, country=None,
                        prompt=False):
@@ -493,7 +566,8 @@ class Program:
                 if len(performers) > 0:
                     tags['PERFORMER'] = performers
 
-        return tags
+        # metadata not from MusicBrainz (FreeDB) has no MusicBrainz ids
+        return {k: v for k, v in tags.items() if v is not None}
 
     def getHTOA(self):
         """

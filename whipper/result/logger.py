@@ -63,7 +63,7 @@ class WhipperLogger(result.Logger):
         data["MusicBrainz Disc ID"] = ripResult.table.getMusicBrainzDiscId()
         data["MusicBrainz lookup URL"] = (
             ripResult.table.getMusicBrainzSubmitURL())
-        if ripResult.metadata:
+        if ripResult.metadata and ripResult.metadata.url:
             data["MusicBrainz Release URL"] = ripResult.metadata.url
         riplog["CD metadata"] = data
 
