@@ -110,35 +110,7 @@ class _CD(BaseCommand):
         # first, read the normal TOC, which is fast
         self.ittoc = self.program.getFastToc(self.runner, self.device)
 
-        # already show us some info based on this
-        self.program.getRipResult()
-        print("CDDB disc id: %s" % self.ittoc.getCDDBDiscId())
-        self.mbdiscid = self.ittoc.getMusicBrainzDiscId()
-        print("MusicBrainz disc id %s" % self.mbdiscid)
-
-        print("MusicBrainz lookup URL %s" %
-              self.ittoc.getMusicBrainzSubmitURL())
-
-        self.program.metadata = (
-            self.program.getMusicBrainz(self.ittoc, self.mbdiscid,
-                                        release=self.options.release_id,
-                                        country=self.options.country,
-                                        prompt=self.options.prompt)
-        )
-
-        if not self.program.metadata:
-            # fall back to FreeDB for lookup
-            cddbid = self.ittoc.getCDDBValues()
-            cddbmd = self.program.getCDDB(cddbid)
-            if cddbmd:
-                logger.info('FreeDB identifies disc as %s', cddbmd)
-
-            # also used by rip cd info
-            if not getattr(self.options, 'unknown', False):
-                logger.critical("unable to retrieve disc metadata, "
-                                "--unknown argument not passed")
-                return -1
-
+        # another cdrdao on the drive; ask before the table scan starts
         self.program.result.isCdr = cdrdao.DetectCdr(self.device)
         if (self.program.result.isCdr and
                 not getattr(self.options, 'cdr', False)):
@@ -146,24 +118,60 @@ class _CD(BaseCommand):
                             "--cdr not passed")
             return -1
 
-        # Change working directory before cdrdao's task
-        if getattr(self.options, 'working_directory', False):
-            os.chdir(os.path.expanduser(self.options.working_directory))
-        if hasattr(self.options, 'output_directory'):
-            out_bpath = self.options.output_directory
-            # Needed to preserve cdrdao's tocfile
-            out_fpath = self.program.getPath(out_bpath,
-                                             self.options.disc_template,
-                                             self.mbdiscid,
-                                             self.program.metadata)
-        else:
-            out_fpath = None
-        # now, read the complete index table, which is slower
-        offset = getattr(self.options, 'offset', 0)
-        self.itable = self.program.getTable(self.runner,
-                                            self.ittoc.getCDDBDiscId(),
-                                            self.ittoc.getMusicBrainzDiscId(),
-                                            self.device, offset, out_fpath)
+        # the complete index table scans the whole disc, which is slow; it
+        # only needs the drive, so read it while the release is picked
+        scan = cdrdao.BackgroundReadTOC(self.device)
+        scan.start()
+        try:
+            # already show us some info based on this
+            self.program.getRipResult()
+            print("CDDB disc id: %s" % self.ittoc.getCDDBDiscId())
+            self.mbdiscid = self.ittoc.getMusicBrainzDiscId()
+            print("MusicBrainz disc id %s" % self.mbdiscid)
+
+            print("MusicBrainz lookup URL %s" %
+                  self.ittoc.getMusicBrainzSubmitURL())
+
+            self.program.metadata = (
+                self.program.getMusicBrainz(self.ittoc, self.mbdiscid,
+                                            release=self.options.release_id,
+                                            country=self.options.country,
+                                            prompt=self.options.prompt)
+            )
+
+            if not self.program.metadata:
+                # fall back to FreeDB for lookup
+                cddbid = self.ittoc.getCDDBValues()
+                cddbmd = self.program.getCDDB(cddbid)
+                if cddbmd:
+                    logger.info('FreeDB identifies disc as %s', cddbmd)
+
+                # also used by rip cd info
+                if not getattr(self.options, 'unknown', False):
+                    logger.critical("unable to retrieve disc metadata, "
+                                    "--unknown argument not passed")
+                    return -1
+
+            # Change working directory before building the output path
+            if getattr(self.options, 'working_directory', False):
+                os.chdir(os.path.expanduser(self.options.working_directory))
+            if hasattr(self.options, 'output_directory'):
+                out_bpath = self.options.output_directory
+                # Needed to preserve cdrdao's tocfile
+                out_fpath = self.program.getPath(out_bpath,
+                                                 self.options.disc_template,
+                                                 self.mbdiscid,
+                                                 self.program.metadata)
+            else:
+                out_fpath = None
+            # now, read the complete index table, which is slower
+            offset = getattr(self.options, 'offset', 0)
+            self.itable = self.program.getTable(
+                self.runner, self.ittoc.getCDDBDiscId(),
+                self.ittoc.getMusicBrainzDiscId(), self.device, offset,
+                out_fpath, scan=scan)
+        finally:
+            scan.cancel()
 
         assert self.itable.getCDDBDiscId() == self.ittoc.getCDDBDiscId(), \
             "full table's id %s differs from toc id %s" % (

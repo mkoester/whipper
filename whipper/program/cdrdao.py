@@ -1,7 +1,7 @@
 import os
 import re
-import shutil
 import tempfile
+import threading
 import subprocess
 from subprocess import Popen, PIPE
 
@@ -31,6 +31,13 @@ class ProgressParser:
     currentTrack = 0
     oldline = ''  # for leadout/final track number detection
 
+    def __init__(self, report=print):
+        """
+        :param report: called with each per-track summary line
+        :type report: callable
+        """
+        self.report = report
+
     def parse(self, line):
         cdrdao_m = _BEGIN_CDRDAO_RE.match(line)
 
@@ -53,9 +60,9 @@ class ProgressParser:
 
         crc_s = _CRC_RE.search(line)
         if crc_s:
-            print("Track %d finished, "
-                  "found %d Q sub-channels with CRC errors" %
-                  (self.currentTrack, int(crc_s.group('channels'))))
+            self.report("Track %d finished, "
+                        "found %d Q sub-channels with CRC errors" %
+                        (self.currentTrack, int(crc_s.group('channels'))))
 
         # TODO: add subcode pre-emphasis info for each track to logger too
         if _SUBCODE_EMPHASIS_LINE in line:
@@ -69,8 +76,9 @@ class ReadTOCTask(task.Task):
 
     description = "Reading TOC"
     toc = None
+    toc_data = None  # contents of the TOC file cdrdao wrote, as bytes
 
-    def __init__(self, device, fast_toc=False, toc_path=None):
+    def __init__(self, device, fast_toc=False, toc_path=None, report=print):
         """
         Read the TOC for ``device``.
 
@@ -80,12 +88,15 @@ class ReadTOCTask(task.Task):
         :type fast_toc: bool
         :param toc_path: where to save TOC if wanted
         :type toc_path: str
+        :param report: called with each per-track summary line
+        :type report: callable
         """
         self.device = device
         self.fast_toc = fast_toc
         self.toc_path = toc_path
         self._buffer = ""  # accumulate characters
-        self._parser = ProgressParser()
+        self._parser = ProgressParser(report)
+        self._aborted = False
 
         self.fd, self.tocfile = tempfile.mkstemp(
             suffix='.cdrdao.read-toc.whipper.task')
@@ -105,6 +116,8 @@ class ReadTOCTask(task.Task):
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE,
                                      close_fds=True)
+        if self._aborted:  # abort() ran in another thread before we started
+            self._popen.terminate()
 
         self.schedule(0.01, self._read, runner)
 
@@ -147,25 +160,117 @@ class ReadTOCTask(task.Task):
 
         self._done()
 
+    def abort(self):
+        """Stop cdrdao if it is still reading; the task then ends quietly."""
+        self._aborted = True
+        popen = getattr(self, '_popen', None)
+        if popen is not None and popen.poll() is None:
+            logger.debug('stopping cdrdao read-toc')
+            popen.terminate()
+
     def _done(self):
         self.setProgress(1.0)
+        if self._aborted:
+            if os.path.exists(self.tocfile):
+                os.unlink(self.tocfile)
+            self.stop()
+            return
         self.toc = TocFile(self.tocfile)
         self.toc.parse()
+        with open(self.tocfile, 'rb') as f:
+            self.toc_data = f.read()
         if self.toc_path is not None:
-            t_comp = os.path.abspath(self.toc_path).split(os.sep)
-            t_dirn = os.sep.join(t_comp[:-1])
-            # If the output path doesn't exist, make it recursively
-            try:
-                os.makedirs(t_dirn)
-                logger.info("creating output directory %s", t_dirn)
-            except FileExistsError as e:
-                logger.debug(e)
-            t_dst = truncate_filename(
-                os.path.join(t_dirn, t_comp[-1] + '.toc'))
-            shutil.copy(self.tocfile, os.path.join(t_dirn, t_dst))
+            save_toc(self.toc_data, self.toc_path)
         os.unlink(self.tocfile)
         self.stop()
         return
+
+
+def save_toc(toc_data, toc_path):
+    """
+    Save a TOC read by ReadTOCTask next to the rip, creating its directory.
+
+    :param toc_data: contents of the TOC file cdrdao wrote
+    :type toc_data: bytes
+    :param toc_path: disc path (without extension) to save the TOC for
+    :type toc_path: str
+    """
+    t_comp = os.path.abspath(toc_path).split(os.sep)
+    t_dirn = os.sep.join(t_comp[:-1])
+    # If the output path doesn't exist, make it recursively
+    try:
+        os.makedirs(t_dirn)
+        logger.info("creating output directory %s", t_dirn)
+    except FileExistsError as e:
+        logger.debug(e)
+    t_dst = truncate_filename(os.path.join(t_dirn, t_comp[-1] + '.toc'))
+    with open(t_dst, 'wb') as f:
+        f.write(toc_data)
+
+
+class BackgroundReadTOC:
+    """
+    Read the full TOC in a background thread.
+
+    The full read scans the whole disc, which takes minutes; it needs only
+    the drive, so it can run while the user picks a release. Its per-track
+    lines are held back until join(), so they don't break into a prompt.
+    """
+
+    def __init__(self, device):
+        """
+        :param device: block device to read TOC from
+        :type device: str
+        """
+        self.task = ReadTOCTask(device, report=self._report)
+        self.task.description = "Reading table"
+        self._lock = threading.Lock()
+        self._held = []  # per-track lines not printed yet; None once live
+        self._exception = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _report(self, line):
+        with self._lock:
+            if self._held is not None:
+                self._held.append(line)
+                return
+        print(line)
+
+    def _run(self):
+        try:
+            # its own runner: SyncRunner runs a new event loop per task
+            task.SyncRunner(verbose=False).run(self.task)
+        # FIXME: catching too general exception (Exception); join() raises
+        # whatever the read raised, in the thread that waits for it
+        except Exception as e:
+            self._exception = e
+
+    def start(self):
+        """Start reading the TOC."""
+        self._thread.start()
+
+    def join(self):
+        """
+        Wait for the read to finish, printing its per-track lines.
+
+        :returns: the finished task
+        :rtype: ReadTOCTask
+        """
+        # replay under the lock, so no live line overtakes a held one
+        with self._lock:
+            for line in self._held:
+                print(line)
+            self._held = None
+            if self._thread.is_alive():
+                print("Waiting for the table of contents scan to finish...")
+        self._thread.join()
+        if self._exception is not None:
+            raise self._exception
+        return self.task
+
+    def cancel(self):
+        """Stop cdrdao if it is still reading; harmless once finished."""
+        self.task.abort()
 
 
 def DetectCdr(device):
