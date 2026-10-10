@@ -110,6 +110,7 @@ class _CD(BaseCommand):
         # first, read the normal TOC, which is fast
         self.ittoc = self.program.getFastToc(self.runner, self.device)
 
+        self.program.getRipResult()
         # another cdrdao on the drive; ask before the table scan starts
         self.program.result.isCdr = cdrdao.DetectCdr(self.device)
         if (self.program.result.isCdr and
@@ -124,7 +125,6 @@ class _CD(BaseCommand):
         scan.start()
         try:
             # already show us some info based on this
-            self.program.getRipResult()
             print("CDDB disc id: %s" % self.ittoc.getCDDBDiscId())
             self.mbdiscid = self.ittoc.getMusicBrainzDiscId()
             print("MusicBrainz disc id %s" % self.mbdiscid)
