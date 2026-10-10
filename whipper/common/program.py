@@ -115,13 +115,16 @@ class Program:
         return toc
 
     def getTable(self, runner, cddbdiscid, mbdiscid, device, offset,
-                 toc_path, reuse_toc=False):
+                 toc_path, reuse_toc=False, scan=None):
         """
         Retrieve the Table from the drive.
 
         :param reuse_toc: use the TOC an earlier rip saved at toc_path
                           instead of reading it, if it matches the disc
         :type reuse_toc: bool
+        :param scan: a read of the table already started in the background;
+                     waited for instead of reading the disc again
+        :type scan: cdrdao.BackgroundReadTOC or None
         :rtype: table.Table
         """
         itable = None
@@ -130,9 +133,14 @@ class Program:
         if reuse_toc and toc_path is not None:
             itable = self.loadSavedTable(toc_path, cddbdiscid, mbdiscid)
         if itable is None:
-            t = cdrdao.ReadTOCTask(device, toc_path=toc_path)
-            t.description = "Reading table"
-            runner.run(t)
+            if scan is not None:
+                t = scan.join()
+                if toc_path is not None:
+                    cdrdao.save_toc(t.toc_data, toc_path)
+            else:
+                t = cdrdao.ReadTOCTask(device, toc_path=toc_path)
+                t.description = "Reading table"
+                runner.run(t)
             itable = t.toc.table
         tdict[offset] = itable
         logger.debug('getTable: read table %r', itable)

@@ -11,6 +11,7 @@ from tempfile import NamedTemporaryFile
 from whipper.common import program, mbngs, config
 from whipper.command.cd import DEFAULT_DISC_TEMPLATE
 from whipper.image.toc import TocFile
+from whipper.program import cdrdao
 from whipper.program.cdrdao import saved_toc_path
 
 
@@ -168,3 +169,31 @@ class CoverArtTestCase(unittest.TestCase):
         release_id = "76df3287-6cda-33eb-8e9a-044b5e15ffdd"
         coverArtPath = self._mock_getCoverArt(path, release_id)
         self.assertTrue(os.path.isfile(coverArtPath))
+
+
+class GetTableTestCase(unittest.TestCase):
+
+    def testWaitsForBackgroundScan(self):
+        toc = TocFile(os.path.join(os.path.dirname(__file__), 'bloc.toc'))
+        toc.parse()
+
+        class Scan:
+            def join(self):
+                t = cdrdao.ReadTOCTask('/dev/fake')
+                t.toc, t.toc_data = toc, b'CD_DA\n'
+                return t
+
+        class Runner:
+            def run(self, t):
+                raise AssertionError('read the disc again')
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        toc_path = os.path.join(tmp, 'Artist - Album', 'Artist - Album')
+        prog = program.Program(config.Config())
+        prog.getRipResult()
+        itable = prog.getTable(Runner(), 'cddb', 'mb', '/dev/fake', 0,
+                               toc_path, scan=Scan())
+        self.assertIs(itable, toc.table)
+        with open(toc_path + '.toc', 'rb') as f:
+            self.assertEqual(f.read(), b'CD_DA\n')
