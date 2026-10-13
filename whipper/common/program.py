@@ -119,6 +119,105 @@ def formatField(label, value, groups=None, marked=False):
     return line
 
 
+# MusicBrainz's release areas for Europe and for the whole world
+EUROPE_CODE = 'XE'
+WORLDWIDE_CODE = 'XW'
+
+# Europe is the only continent MusicBrainz releases are issued in; the
+# last codes are former countries (Soviet Union, East Germany,
+# Czechoslovakia, Serbia and Montenegro, Yugoslavia)
+EUROPEAN_CODES = frozenset((
+    'AD', 'AL', 'AT', 'AX', 'BA', 'BE', 'BG', 'BY', 'CH', 'CY', 'CZ',
+    'DE', 'DK', 'EE', 'ES', 'FI', 'FO', 'FR', 'GB', 'GG', 'GI', 'GR',
+    'HR', 'HU', 'IE', 'IM', 'IS', 'IT', 'JE', 'LI', 'LT', 'LU', 'LV',
+    'MC', 'MD', 'ME', 'MK', 'MT', 'NL', 'NO', 'PL', 'PT', 'RO', 'RS',
+    'RU', 'SE', 'SI', 'SJ', 'SK', 'SM', 'UA', 'VA', 'XK',
+    'SU', 'XG', 'XC', 'XS', 'XY',
+))
+
+
+def countryRank(codes, preferred):
+    """
+    Rank a release's countries against a preferred country.
+
+    :param codes: ISO 3166-1 codes of the release countries
+    :type codes: list(str)
+    :param preferred: ISO 3166-1 code of the preferred country
+    :type preferred: str
+    :returns: 0 for the country itself, 1 for its continent,
+              2 for worldwide, 3 for anything else
+    :rtype: int
+    """
+    if preferred in codes:
+        return 0
+    if preferred in EUROPEAN_CODES and EUROPE_CODE in codes:
+        return 1
+    if WORLDWIDE_CODE in codes:
+        return 2
+    return 3
+
+
+def sortReleases(metadatas, preferred=None):
+    """
+    Sort matching releases by country.
+
+    Releases of the preferred country come first, then those of its
+    continent, then worldwide ones; each part is alphabetical, with
+    releases without a country last.
+
+    :type metadatas: list(mbngs.DiscMetadata)
+    :param preferred: ISO 3166-1 code of the preferred country, if any
+    :type preferred: str or None
+    :rtype: list(mbngs.DiscMetadata)
+    """
+    def key(metadata):
+        rank = 0
+        if preferred:
+            rank = countryRank(metadata.countryCodes, preferred.upper())
+        countries = ', '.join(metadata.countries or [])
+        # MusicBrainz calls the whole world "[Worldwide]"
+        return rank, not countries, countries.lstrip('[').casefold()
+    return sorted(metadatas, key=key)
+
+
+def groupReleases(metadatas):
+    """
+    Group matching releases by barcode, then by catalog numbers.
+
+    Groups keep the order of their first release, and the catalog
+    number groups of one barcode stay next to each other.
+
+    :type metadatas: list(mbngs.DiscMetadata)
+    :returns: ((barcode, catalog numbers), releases) for each group
+    :rtype: list(tuple(tuple(str or None, tuple(str)),
+                 list(mbngs.DiscMetadata)))
+    """
+    barcodes = {}
+    for metadata in metadatas:
+        catalogs = barcodes.setdefault(metadata.barcode or None, {})
+        catalogs.setdefault(tuple(metadata.catalogNumbers), []).append(
+            metadata)
+    return [((barcode, catalogNumbers), members)
+            for barcode, catalogs in barcodes.items()
+            for catalogNumbers, members in catalogs.items()]
+
+
+def groupHeader(key, count):
+    """
+    Format the line introducing a group of matching releases.
+
+    :param key: (barcode, catalog numbers) shared by the group
+    :type key: tuple(str or None, tuple(str))
+    :param count: number of releases in the group
+    :type count: int
+    :rtype: str
+    """
+    barcode, catalogNumbers = key
+    return '== Barcode %s, Cat no(s) %s (%d release%s)' % (
+        barcode or '-', ', '.join(catalogNumbers) or '-', count,
+        '' if count == 1 else 's')
+
+
 # FIXME: should Program have a runner ?
 
 
@@ -488,7 +587,8 @@ class Program:
             print('Please enter a number from 1 to %d, or n.' % len(metadatas))
 
     def getMusicBrainz(self, ittoc, mbdiscid, release=None, country=None,
-                       prompt=False, show_differences=False):
+                       prompt=False, show_differences=False,
+                       sort_country=None, group_releases=False):
         """
         Fetch MusicBrainz's metadata for the given MusicBrainz disc id.
 
@@ -507,6 +607,13 @@ class Program:
         :param show_differences: whether to highlight the fields that
                                  differ between matching releases
         :type show_differences: bool
+        :param sort_country: sort matching releases by country, this ISO
+                             3166-1 code first; an empty string sorts
+                             alphabetically, None keeps MusicBrainz's order
+        :type sort_country: str or None
+        :param group_releases: whether to group matching releases by
+                               barcode and catalog numbers
+        :type group_releases: bool
         """
         # look up disc on MusicBrainz
         print('Disc duration: %s, %d audio tracks' % (
@@ -542,25 +649,37 @@ class Program:
 
             print('\nMatching releases:')
 
-            releases = [releaseFields(m) for m in metadatas]
+            # the new order also decides between equally close durations
+            if sort_country is not None and len(metadatas) > 1:
+                metadatas = sortReleases(metadatas, sort_country)
+            groups = [(None, metadatas)]
+            if group_releases and len(metadatas) > 1:
+                groups = groupReleases(metadatas)
+                metadatas = [m for _, members in groups for m in members]
+
             differences = {}
-            if show_differences and len(releases) > 1:
-                differences = releaseDifferences(releases)
+            if show_differences and len(metadatas) > 1:
+                differences = releaseDifferences(
+                    [releaseFields(m) for m in metadatas])
             marked = bool(differences) and not color.enabled(sys.stdout)
 
-            for metadata, fields in zip(metadatas, releases):
-                print()
-                for label, value in fields:
-                    # a differing field is shown even where it is missing
-                    if value is None and label not in differences:
-                        continue
-                    print(formatField(label, value, differences.get(label),
-                                      marked))
+            for key, members in groups:
+                if key is not None:
+                    print('\n' + color.bold(groupHeader(key, len(members)),
+                                            sys.stdout))
+                for metadata in members:
+                    print()
+                    for label, value in releaseFields(metadata):
+                        # a differing field is shown even where it is missing
+                        if value is None and label not in differences:
+                            continue
+                        print(formatField(label, value,
+                                          differences.get(label), marked))
 
-                delta = abs(metadata.duration - ittoc.duration())
-                if delta not in deltas:
-                    deltas[delta] = []
-                deltas[delta].append(metadata)
+                    delta = abs(metadata.duration - ittoc.duration())
+                    if delta not in deltas:
+                        deltas[delta] = []
+                    deltas[delta].append(metadata)
 
             lowest = None
 

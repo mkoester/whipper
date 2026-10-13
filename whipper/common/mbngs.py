@@ -77,6 +77,9 @@ class DiscMetadata:
     :vartype tracks: list of :any:`TrackMetadata`
     :cvar countries: MusicBrainz release countries
     :vartype countries: list or None
+    :cvar countryCodes: ISO 3166-1 codes of the release countries
+                        (MusicBrainz adds XE for Europe, XW for worldwide)
+    :vartype countryCodes: list[str]
     :cvar discNumber: number of current disc
     :vartype discNumber: int or None
     :cvar discTotal: total number of discs in the chosen release
@@ -106,6 +109,7 @@ class DiscMetadata:
     catalogNumbers: list[str]
     barcode = None
     countries = None
+    countryCodes: list[str]
     discNumber = None
     discTotal = None
     mediumTitle = None
@@ -113,6 +117,7 @@ class DiscMetadata:
     def __init__(self):
         self.tracks = []
         self.catalogNumbers = []
+        self.countryCodes = []
 
 
 def _record(record, which, name, what):
@@ -286,10 +291,15 @@ def _getMetadata(release, discid=None, country=None):
     mb_rel = release.get('release-event-list', None)
     # NOTE: check included as I don't know if this one is always available
     if mb_rel is not None:
-        countries = [rel.get('area', {}).get('name', None) for rel in mb_rel]
+        areas = [rel.get('area', {}) for rel in mb_rel]
+        countries = [area.get('name', None) for area in areas]
         discMD.countries = list(filter(None, countries))
+        discMD.countryCodes = [area['iso-3166-1-code-list'][0]
+                               for area in areas
+                               if area.get('iso-3166-1-code-list')]
     else:
         discMD.countries = list(filter(None, [release.get('country', None)]))
+        discMD.countryCodes = list(discMD.countries)
     lil = release.get('label-info-list', [])
     catalog_numbers = []
     for li in lil:

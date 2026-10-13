@@ -211,6 +211,8 @@ class MetadataTestCase(unittest.TestCase):
 
         metadata = mbngs._getMetadata(response['release'], discid)
         self.assertEqual(metadata.artist, 'Nena & Kim Wilde')
+        self.assertEqual(metadata.countries, ['Germany'])
+        self.assertEqual(metadata.countryCodes, ['DE'])
         self.assertEqual(metadata.release, '2003-05-19')
         self.assertEqual(metadata.mbidArtist, [
             '38bfaa7f-ee98-48cb-acd0-946d7aeecd76',
@@ -289,6 +291,9 @@ class MetadataTestCase(unittest.TestCase):
                          '/6109ceed-7e21-490b-b5ad-3a66b4e4cfbb')
         self.assertEqual(metadata.catalogNumbers, ['[none]'])
         self.assertEqual(metadata.barcode, '700261430249')
+        # a release event without an area
+        self.assertEqual(metadata.countries, [])
+        self.assertEqual(metadata.countryCodes, [])
 
         self.assertEqual(len(metadata.tracks), 16)
 
