@@ -162,3 +162,87 @@ class FormatFieldTestCase(unittest.TestCase):
         groups = {str(n): n for n in range(1, 7)}
         self.assertEqual(program.formatField('Country', '6', groups),
                          '\033[33mCountry  \033[0m: \033[36m6\033[0m')
+
+
+def _metadata(name, codes=(), countries=None, barcode=None, catnos=()):
+    md = mbngs.DiscMetadata()
+    md.releaseTitle = name
+    md.countryCodes = list(codes)
+    md.countries = list(codes if countries is None else countries)
+    md.barcode = barcode
+    md.catalogNumbers = list(catnos)
+    return md
+
+
+class CountryRankTestCase(unittest.TestCase):
+
+    def testOrder(self):
+        self.assertEqual(program.countryRank(['DE'], 'DE'), 0)
+        self.assertEqual(program.countryRank(['XE'], 'DE'), 1)
+        self.assertEqual(program.countryRank(['XW'], 'DE'), 2)
+        self.assertEqual(program.countryRank(['US'], 'DE'), 3)
+        self.assertEqual(program.countryRank([], 'DE'), 3)
+
+    def testBestOfSeveralCountries(self):
+        self.assertEqual(program.countryRank(['XW', 'DE'], 'DE'), 0)
+
+    def testEuropeIsNotTheContinentOfOthers(self):
+        self.assertEqual(program.countryRank(['XE'], 'US'), 3)
+
+
+class SortReleasesTestCase(unittest.TestCase):
+
+    def titles(self, metadatas):
+        return [md.releaseTitle for md in metadatas]
+
+    def testPreferredCountryFirst(self):
+        metadatas = [_metadata('us', ['US'], ['United States']),
+                     _metadata('xw', ['XW'], ['[Worldwide]']),
+                     _metadata('none'),
+                     _metadata('xe', ['XE'], ['Europe']),
+                     _metadata('de', ['DE'], ['Germany']),
+                     _metadata('fr', ['FR'], ['France'])]
+        self.assertEqual(
+            self.titles(program.sortReleases(metadatas, 'de')),
+            ['de', 'xe', 'xw', 'fr', 'us', 'none'])
+
+    def testAlphabeticalWithoutCountry(self):
+        metadatas = [_metadata('xw', ['XW'], ['[Worldwide]']),
+                     _metadata('us', ['US'], ['United States']),
+                     _metadata('none'),
+                     _metadata('xe', ['XE'], ['Europe'])]
+        self.assertEqual(self.titles(program.sortReleases(metadatas, '')),
+                         ['xe', 'us', 'xw', 'none'])
+
+
+class GroupReleasesTestCase(unittest.TestCase):
+
+    def testCatalogGroupsStayTogether(self):
+        metadatas = [_metadata('a', barcode='1', catnos=['A']),
+                     _metadata('b', barcode='2', catnos=['B']),
+                     _metadata('c', barcode='1', catnos=['C']),
+                     _metadata('d', barcode='1', catnos=['A']),
+                     _metadata('e')]
+        groups = program.groupReleases(metadatas)
+        self.assertEqual(
+            [(key, [md.releaseTitle for md in members])
+             for key, members in groups],
+            [(('1', ('A',)), ['a', 'd']), (('1', ('C',)), ['c']),
+             (('2', ('B',)), ['b']), ((None, ()), ['e'])])
+
+    def testSortedGroupsComeFirst(self):
+        metadatas = [_metadata('us', ['US'], ['United States'], '1'),
+                     _metadata('jp', ['JP'], ['Japan'], '2'),
+                     _metadata('xe', ['XE'], ['Europe'], '1'),
+                     _metadata('de', ['DE'], ['Germany'], '2')]
+        groups = program.groupReleases(
+            program.sortReleases(metadatas, 'DE'))
+        self.assertEqual(
+            [[md.releaseTitle for md in members] for _, members in groups],
+            [['de', 'jp'], ['xe', 'us']])
+
+    def testHeader(self):
+        self.assertEqual(program.groupHeader(('1', ('A', 'B')), 2),
+                         '== Barcode 1, Cat no(s) A, B (2 releases)')
+        self.assertEqual(program.groupHeader((None, ()), 1),
+                         '== Barcode -, Cat no(s) - (1 release)')

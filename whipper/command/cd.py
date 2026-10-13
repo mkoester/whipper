@@ -95,6 +95,16 @@ class _CD(BaseCommand):
                             action="store_true", dest="show_differences",
                             help="Highlight the fields that differ between "
                             "matching releases")
+        parser.add_argument('--sort-country', nargs='?', const='',
+                            action="store", dest="sort_country",
+                            metavar="CODE",
+                            help="Sort matching releases by country; with "
+                            "an ISO 3166-1 code (e.g. DE), list that country "
+                            "first, then its continent, then worldwide")
+        parser.add_argument('--group-releases',
+                            action="store_true", dest="group_releases",
+                            help="Group matching releases by barcode and "
+                            "catalog number")
 
     def do(self):
         self.config = config.Config()
@@ -131,7 +141,10 @@ class _CD(BaseCommand):
                                         country=self.options.country,
                                         prompt=self.options.prompt,
                                         show_differences=(
-                                            self.options.show_differences))
+                                            self.options.show_differences),
+                                        sort_country=self.options.sort_country,
+                                        group_releases=(
+                                            self.options.group_releases))
         )
 
         if not self.program.metadata:
