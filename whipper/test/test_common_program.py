@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from tempfile import NamedTemporaryFile
-from whipper.common import program, mbngs, config
+from whipper.common import color, program, mbngs, config
 from whipper.command.cd import DEFAULT_DISC_TEMPLATE, DEFAULT_TRACK_TEMPLATE
 from whipper.image.toc import TocFile
 from whipper.program import cdrdao
@@ -320,3 +320,73 @@ class ChooseCDDBTestCase(unittest.TestCase):
         md, prompts = self.choose('3', 'x', '1')
         self.assertEqual(len(prompts), 3)
         self.assertEqual(md.artist, 'Elvis Presley')
+
+
+class ReleaseDifferencesTestCase(unittest.TestCase):
+
+    @staticmethod
+    def _release(mbid, barcode='194399566428', countries=('United States',)):
+        md = mbngs.DiscMetadata()
+        md.artist = 'Alicia Keys'
+        md.releaseTitle = 'KEYS (Disc 2 of 2): Unlocked'
+        md.duration = 2206423
+        md.url = 'https://musicbrainz.org/release/' + mbid
+        md.mbid = mbid
+        md.releaseType = 'Album'
+        md.barcode = barcode
+        md.countries = list(countries)
+        md.catalogNumbers = ['19439-95664-2']
+        return program.releaseFields(md)
+
+    def testEqual(self):
+        releases = [self._release('f7c03888'), self._release('2c159974')]
+        self.assertEqual(program.releaseDifferences(releases), {})
+
+    def testGroupsInOrderOfAppearance(self):
+        releases = [self._release('a', countries=['Europe']),
+                    self._release('b', countries=['United States']),
+                    self._release('c', countries=['Europe'])]
+        self.assertEqual(program.releaseDifferences(releases),
+                         {'Country': {'Europe': 1, 'United States': 2}})
+
+    def testMissingIsAValue(self):
+        releases = [self._release('a'), self._release('b', barcode=None)]
+        self.assertEqual(program.releaseDifferences(releases),
+                         {'Barcode': {'194399566428': 1, None: 2}})
+
+
+class FormatFieldTestCase(unittest.TestCase):
+
+    def tearDown(self):
+        color.set_mode('never')
+
+    def testPlain(self):
+        self.assertEqual(program.formatField('Country', 'Europe'),
+                         'Country  : Europe')
+
+    def testMarked(self):
+        groups = {'United States': 1, 'Europe': 2}
+        self.assertEqual(program.formatField('Country', 'Europe', groups,
+                                             marked=True),
+                         '* Country  : Europe [2]')
+        self.assertEqual(program.formatField('Type', 'Album', marked=True),
+                         '  Type     : Album')
+
+    def testMissing(self):
+        self.assertEqual(program.formatField('Barcode', None, {'1': 1,
+                                                               None: 2}),
+                         'Barcode  : - [2]')
+
+    def testColored(self):
+        color.set_mode('always')
+        groups = {'United States': 1, 'Europe': 2}
+        self.assertEqual(program.formatField('Country', 'Europe', groups),
+                         '\033[33mCountry  \033[0m: \033[35mEurope\033[0m')
+        self.assertEqual(program.formatField('Type', 'Album'),
+                         'Type     : Album')
+
+    def testColorsRepeat(self):
+        color.set_mode('always')
+        groups = {str(n): n for n in range(1, 7)}
+        self.assertEqual(program.formatField('Country', '6', groups),
+                         '\033[33mCountry  \033[0m: \033[36m6\033[0m')

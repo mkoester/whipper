@@ -24,12 +24,13 @@ import musicbrainzngs
 import re
 import os
 import shutil
+import sys
 import time
 
 from tempfile import NamedTemporaryFile
 from packaging.version import Version
 
-from whipper.common import accurip, checksum, common, mbngs, path
+from whipper.common import accurip, checksum, color, common, mbngs, path
 from whipper.program import cdrdao, cdparanoia
 from whipper.result import result
 from whipper.image import image
@@ -39,6 +40,83 @@ from whipper.extern.task import task
 
 import logging
 logger = logging.getLogger(__name__)
+
+# these identify a release, so they always differ between releases
+UNCOMPARED_FIELDS = ('URL', 'Release')
+
+
+def releaseFields(metadata):
+    """
+    List the fields shown for a matching release.
+
+    :type metadata: mbngs.DiscMetadata
+    :returns: (label, value) pairs; value is None for an optional field
+              the release lacks
+    :rtype: list(tuple(str, str or None))
+    """
+    return [
+        ('Artist', '%s' % metadata.artist),
+        ('Title', '%s' % metadata.releaseTitle),
+        ('Duration', common.formatTime(metadata.duration / 1000.0)),
+        ('URL', '%s' % metadata.url),
+        ('Release', '%s' % metadata.mbid),
+        ('Type', '%s' % metadata.releaseType),
+        ('Barcode', metadata.barcode or None),
+        ('Country', ', '.join(metadata.countries or []) or None),
+        # TODO: Add test for non ASCII catalog numbers: see issue #215
+        ('Cat no(s)', ', '.join(metadata.catalogNumbers) or None),
+    ]
+
+
+def releaseDifferences(releases):
+    """
+    Find the fields whose values differ between matching releases.
+
+    :param releases: the fields of each release, from releaseFields
+    :type releases: list(list(tuple(str, str or None)))
+    :returns: for each differing label, the group number of each of its
+              values, numbered from 1 in order of first appearance
+    :rtype: dict(str, dict(str or None, int))
+    """
+    differences = {}
+    for label, _ in releases[0]:
+        if label in UNCOMPARED_FIELDS:
+            continue
+        groups = {}
+        for fields in releases:
+            groups.setdefault(dict(fields)[label], len(groups) + 1)
+        if len(groups) > 1:
+            differences[label] = groups
+    return differences
+
+
+def formatField(label, value, groups=None, marked=False):
+    """
+    Format one line of a matching release.
+
+    :param groups: group number of each value, if the field differs
+                   between releases
+    :type groups: dict(str or None, int) or None
+    :param marked: whether to start the line with a column flagging
+                   differing fields, for output without colour
+    :type marked: bool
+    :rtype: str
+    """
+    # pad before colouring, padding would count the escape codes
+    name = '%-9s' % label
+    shown = '-' if value is None else value
+    if groups is not None:
+        group = groups[value]
+        if color.enabled(sys.stdout):
+            name = color.style(name, color.YELLOW, sys.stdout)
+            code = color.VALUE_COLORS[(group - 1) % len(color.VALUE_COLORS)]
+            shown = color.style(shown, code, sys.stdout)
+        else:
+            shown = '%s [%d]' % (shown, group)
+    line = '%s: %s' % (name, shown)
+    if marked:
+        line = ('* ' if groups is not None else '  ') + line
+    return line
 
 
 # FIXME: should Program have a runner ?
@@ -410,7 +488,7 @@ class Program:
             print('Please enter a number from 1 to %d, or n.' % len(metadatas))
 
     def getMusicBrainz(self, ittoc, mbdiscid, release=None, country=None,
-                       prompt=False):
+                       prompt=False, show_differences=False):
         """
         Fetch MusicBrainz's metadata for the given MusicBrainz disc id.
 
@@ -426,6 +504,9 @@ class Program:
         :param prompt: whether to prompt if there are multiple
                        matching releases
         :type prompt: bool
+        :param show_differences: whether to highlight the fields that
+                                 differ between matching releases
+        :type show_differences: bool
         """
         # look up disc on MusicBrainz
         print('Disc duration: %s, %d audio tracks' % (
@@ -461,21 +542,20 @@ class Program:
 
             print('\nMatching releases:')
 
-            for metadata in metadatas:
-                print('\nArtist   : %s' % metadata.artist)
-                print('Title    : %s' % metadata.releaseTitle)
-                print('Duration : %s' % common.formatTime(
-                                           metadata.duration / 1000.0))
-                print('URL      : %s' % metadata.url)
-                print('Release  : %s' % metadata.mbid)
-                print('Type     : %s' % metadata.releaseType)
-                if metadata.barcode:
-                    print("Barcode  : %s" % metadata.barcode)
-                if metadata.countries:
-                    print("Country  : %s" % ', '.join(metadata.countries))
-                # TODO: Add test for non ASCII catalog numbers: see issue #215
-                if metadata.catalogNumbers:
-                    print("Cat no(s): %s" % ', '.join(metadata.catalogNumbers))
+            releases = [releaseFields(m) for m in metadatas]
+            differences = {}
+            if show_differences and len(releases) > 1:
+                differences = releaseDifferences(releases)
+            marked = bool(differences) and not color.enabled(sys.stdout)
+
+            for metadata, fields in zip(metadatas, releases):
+                print()
+                for label, value in fields:
+                    # a differing field is shown even where it is missing
+                    if value is None and label not in differences:
+                        continue
+                    print(formatField(label, value, differences.get(label),
+                                      marked))
 
                 delta = abs(metadata.duration - ittoc.duration())
                 if delta not in deltas:

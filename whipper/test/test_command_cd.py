@@ -151,7 +151,8 @@ class FreeDBFallbackTestCase(unittest.TestCase):
         cmd = cd.Info.__new__(cd.Info)
         cmd.options = types.SimpleNamespace(
             record=False, device='/dev/fake', drive_auto_close=False,
-            release_id=None, country=None, prompt=False, cdr=False,
+            release_id=None, country=None, prompt=False,
+            show_differences=False, cdr=False,
             **options)
         try:
             return cmd, cmd.do()

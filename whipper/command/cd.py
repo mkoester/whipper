@@ -144,6 +144,10 @@ class _CD(BaseCommand):
         parser.add_argument('-c', '--country',
                             action="store", dest="country",
                             help="Filter releases by country")
+        parser.add_argument('--show-differences',
+                            action="store_true", dest="show_differences",
+                            help="Highlight the fields that differ between "
+                            "matching releases")
 
     def do(self):
         self.config = config.Config()
@@ -197,7 +201,9 @@ class _CD(BaseCommand):
                 self.program.getMusicBrainz(self.ittoc, self.mbdiscid,
                                             release=self.options.release_id,
                                             country=self.options.country,
-                                            prompt=self.options.prompt)
+                                            prompt=self.options.prompt,
+                                            show_differences=(
+                                                self.options.show_differences))
             )
 
             if not self.program.metadata:
